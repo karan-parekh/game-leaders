@@ -18,3 +18,7 @@ export function rankParticipants(participants: RankedParticipant[], direction: s
 export function rankOf(participants: RankedParticipant[], direction: string, userId: string) {
   return rankParticipants([...participants], direction).findIndex((participant) => participant.user_id === userId) + 1;
 }
+
+export function rankLabel(participants: RankedParticipant[], direction: string, userId: string) {
+  return `#${rankOf(participants, direction, userId)}`;
+}

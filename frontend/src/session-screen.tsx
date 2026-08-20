@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, messageOf, type Me, type Session } from "./api";
-import { rankOf as rankForUser, rankParticipants, totalScore } from "./session-ranking";
+import { rankLabel, rankParticipants, totalScore } from "./session-ranking";
 import { useToast } from "./toast";
 
 const STATE_LABELS: Record<string, string> = {
@@ -13,10 +13,6 @@ const STATE_LABELS: Record<string, string> = {
 
 function stateLabel(state: string) {
   return STATE_LABELS[state] ?? state;
-}
-
-function rankOf(session: Session, userId: string) {
-  return rankForUser(session.participants, session.ranking_direction, userId);
 }
 
 function ScoreActions({ session, metric, disabled, onDelta, onCustom }: {
@@ -190,7 +186,7 @@ export function SessionScreen({ sessionId, me, onFinished }: { sessionId: string
         <section className="flex w-full max-w-xs flex-col items-center gap-2 rounded-lg border border-gray-200 bg-white p-4" aria-label="Your score">
           <div className="flex w-full items-center justify-between">
             <span className="flex h-9 w-9 items-center justify-center rounded border border-gray-300 bg-gray-100 text-xs font-bold text-gray-600">{self.username.slice(0, 2).toUpperCase()}</span>
-            <span className="rounded bg-blue-50 px-2 py-0.5 text-[10px] font-bold text-blue-600">#{rankOf(session, me.id)}</span>
+            <span className="rounded bg-blue-50 px-2 py-0.5 text-[10px] font-bold text-blue-600">{rankLabel(session.participants, session.ranking_direction, me.id)}</span>
           </div>
           <span className="text-7xl font-bold leading-none tracking-tight">{selfScore}</span>
           <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">{currentMetric?.label}</span>
@@ -216,12 +212,12 @@ export function SessionScreen({ sessionId, me, onFinished }: { sessionId: string
           <h2 className="text-sm font-semibold">Players</h2>
           <span className="font-mono text-[11px] text-gray-400">{session.participants.filter((p) => p.active).length}/{session.capacity}</span>
         </div>
-        {others.map((p, i) => (
+        {others.map((p) => (
           <div className="flex items-center gap-3 rounded border border-gray-100 bg-white px-3 py-2" key={p.user_id}>
             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded border border-gray-200 bg-gray-50 text-[11px] font-bold text-gray-500">{p.username.slice(0, 2).toUpperCase()}</span>
             <div className="flex min-w-0 flex-1 flex-col">
               <strong className="truncate text-sm font-semibold">{p.username}</strong>
-              <span className="text-[11px] text-gray-400">#{i + 2}</span>
+              <span className="text-[11px] text-gray-400">{rankLabel(session.participants, session.ranking_direction, p.user_id)}</span>
             </div>
             <span className="text-lg font-semibold">{totalScore(p)}</span>
           </div>

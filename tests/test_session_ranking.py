@@ -14,11 +14,11 @@ class SessionRankingTests(unittest.TestCase):
                 "node",
                 "--experimental-strip-types",
                 "-e",
-                "import { rankOf, rankParticipants } from './src/session-ranking.ts'; const participants = [{ user_id: 'high', active: true, scores: { points: 20 } }, { user_id: 'low', active: true, scores: { points: 10 } }]; console.log(JSON.stringify({ order: rankParticipants(participants, 'low').map((p) => p.user_id), rank: rankOf(participants, 'low', 'low') }));",
+                "import { rankLabel, rankParticipants } from './src/session-ranking.ts'; const participants = [{ user_id: 'high', active: true, scores: { points: 20 } }, { user_id: 'low', active: true, scores: { points: 10 } }]; console.log(JSON.stringify({ order: rankParticipants(participants, 'low').map((p) => p.user_id), label: rankLabel(participants, 'low', 'low'), otherLabel: rankLabel(participants, 'low', 'high') }));",
             ],
             cwd=FRONTEND,
             check=True,
             capture_output=True,
             text=True,
         )
-        self.assertEqual(json.loads(result.stdout), {"order": ["low", "high"], "rank": 1})
+        self.assertEqual(json.loads(result.stdout), {"order": ["low", "high"], "label": "#1", "otherLabel": "#2"})
