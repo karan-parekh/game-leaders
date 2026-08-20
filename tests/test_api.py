@@ -85,6 +85,19 @@ async def test_events_stream_requires_active_membership(client):
 
 
 @pytest.mark.asyncio
+async def test_session_snapshot_exposes_game_ranking_direction(client):
+    async with SessionLocal() as db:
+        game = GameDefinition(name="Low Wins", default_timeout_minutes=60, ranking_direction="low", metrics=[{"id": "points", "label": "Points"}])
+        db.add(game)
+        await db.commit()
+        game_id = game.id
+    await register_and_login(client, "low_player")
+    created = await client.post("/sessions", json={"game_id": game_id, "capacity": 2})
+
+    assert created.json()["ranking_direction"] == "low"
+
+
+@pytest.mark.asyncio
 async def test_global_leaderboard_aggregates_best_scores_across_games(client):
     async with SessionLocal() as db:
         game_a = GameDefinition(name="Game A", default_timeout_minutes=60, ranking_direction="high", metrics=[{"id": "points", "label": "Points"}])
@@ -108,4 +121,3 @@ async def test_global_leaderboard_aggregates_best_scores_across_games(client):
     assert board[0]["username"] == "champion"
     assert board[0]["score"] == 65
     assert board[0]["games_played"] == 3
-

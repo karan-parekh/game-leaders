@@ -20,6 +20,7 @@ export type Session = {
   room_code: string;
   name: string;
   game_id: string;
+  ranking_direction: string;
   host_id: string;
   capacity: number;
   timeout_minutes: number;

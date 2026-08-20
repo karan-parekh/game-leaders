@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { api, messageOf, type Me, type Session, type SessionParticipant } from "./api";
+import { api, messageOf, type Me, type Session } from "./api";
+import { rankOf as rankForUser, rankParticipants, totalScore } from "./session-ranking";
 import { useToast } from "./toast";
 
 const STATE_LABELS: Record<string, string> = {
@@ -14,15 +15,8 @@ function stateLabel(state: string) {
   return STATE_LABELS[state] ?? state;
 }
 
-function totalScore(participant: SessionParticipant) {
-  return Object.values(participant.scores).reduce((sum, value) => sum + value, 0);
-}
-
 function rankOf(session: Session, userId: string) {
-  const ranked = [...session.participants]
-    .filter((p) => p.active)
-    .sort((a, b) => totalScore(b) - totalScore(a));
-  return ranked.findIndex((p) => p.user_id === userId) + 1;
+  return rankForUser(session.participants, session.ranking_direction, userId);
 }
 
 function ScoreActions({ session, metric, disabled, onDelta, onCustom }: {
@@ -104,9 +98,7 @@ export function SessionScreen({ sessionId, me, onFinished }: { sessionId: string
 
   const isHost = session.host_id === me.id;
   const self = session.participants.find((p) => p.user_id === me.id && p.active);
-  const others = [...session.participants]
-    .filter((p) => p.active && p.user_id !== me.id)
-    .sort((a, b) => totalScore(b) - totalScore(a));
+  const others = rankParticipants(session.participants, session.ranking_direction).filter((p) => p.user_id !== me.id);
   const currentMetric = session.metrics.find((m) => m.id === selectedMetric) ?? session.metrics[0];
   const scoresEditable = session.state === "live" || session.state === "timed_out";
   const selfScore = self ? (self.scores[selectedMetric] ?? 0) : 0;

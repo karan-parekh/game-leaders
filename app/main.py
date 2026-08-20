@@ -66,9 +66,10 @@ async def member_ids(db: AsyncSession, session_id: str) -> set[str]:
 
 
 async def snapshot(db: AsyncSession, session: GameSession) -> dict:
+    game = await db.get(GameDefinition, session.game_id)
     participants = await db.execute(select(Participant, User).join(User, User.id == Participant.user_id).where(Participant.session_id == session.id))
     people = [{"user_id": user.id, "username": user.username, "active": participant.active, "scores": session.scores.get(user.id, {})} for participant, user in participants]
-    return {"id": session.id, "room_code": session.room_code, "name": session.name, "game_id": session.game_id, "host_id": session.host_id, "capacity": session.capacity, "timeout_minutes": session.timeout_minutes, "state": session.state, "metrics": session.metrics, "revision": session.revision, "deadline": session.deadline.isoformat() if session.deadline else None, "participants": people}
+    return {"id": session.id, "room_code": session.room_code, "name": session.name, "game_id": session.game_id, "ranking_direction": game.ranking_direction, "host_id": session.host_id, "capacity": session.capacity, "timeout_minutes": session.timeout_minutes, "state": session.state, "metrics": session.metrics, "revision": session.revision, "deadline": session.deadline.isoformat() if session.deadline else None, "participants": people}
 
 
 async def publish_snapshot(db: AsyncSession, session: GameSession) -> dict:
