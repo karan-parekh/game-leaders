@@ -1,32 +1,11 @@
 import { type FormEvent, useState } from "react";
 import { api, messageOf } from "./api";
+import { type AuthForm, passwordError, usernameError, validate } from "./auth-validation";
 import { useToast } from "./toast";
 
 const inputClass = "rounded border border-gray-300 bg-white px-3 py-2.5 text-gray-900";
 const buttonClass = "rounded bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white";
 const errorClass = "text-xs text-red-600";
-
-type AuthForm = { username: string; password: string };
-
-const USERNAME_PATTERN = /^[A-Za-z0-9_]+$/;
-
-function usernameError(username: string) {
-  if (username.length > 0 && username.length < 3) return "At least 3 characters";
-  if (username.length > 32) return "At most 32 characters";
-  if (username.length > 0 && !USERNAME_PATTERN.test(username)) return "Letters, numbers, and underscores only";
-  return "";
-}
-
-function passwordError(password: string) {
-  if (password.length > 0 && password.length < 8) return "At least 8 characters";
-  if (password.length > 128) return "At most 128 characters";
-  return "";
-}
-
-function validate(form: AuthForm) {
-  const errors = { username: usernameError(form.username), password: passwordError(form.password) };
-  return { errors, valid: errors.username === "" && errors.password === "" };
-}
 
 export function LoginScreen({ notice, onSuccess, onRegister }: { notice?: string; onSuccess: () => void; onRegister: () => void }) {
   const [form, setForm] = useState<AuthForm>({ username: "", password: "" });
