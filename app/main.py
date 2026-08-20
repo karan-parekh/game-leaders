@@ -174,7 +174,11 @@ async def join_session(session_id: str, user: User = Depends(current_user), db: 
     if user.id not in participants and len(participants) >= session.capacity:
         raise HTTPException(status_code=409, detail="Session is full")
     if user.id not in participants:
-        db.add(Participant(session_id=session.id, user_id=user.id))
+        existing = (await db.execute(select(Participant).where(Participant.session_id == session.id, Participant.user_id == user.id))).scalar_one_or_none()
+        if existing:
+            existing.active = True
+        else:
+            db.add(Participant(session_id=session.id, user_id=user.id))
         await db.commit()
     return await publish_snapshot(db, session)
 
@@ -275,19 +279,36 @@ async def leaderboard(game_id: str, _: User = Depends(current_user), db: AsyncSe
     game = (await db.execute(select(GameDefinition).where(GameDefinition.id == game_id))).scalar_one_or_none()
     if not game:
         raise HTTPException(status_code=404, detail="Game not found")
-    sessions = (await db.execute(select(GameSession).where(GameSession.game_id == game_id, GameSession.state.in_([SessionState.TIMED_OUT, SessionState.FINALIZED])))).scalars()
-    best: dict[str, dict] = {}
+    return await build_leaderboard(db, {game_id: game}, sort_descending=game.ranking_direction == "high")
+
+
+@app.get("/leaderboards")
+async def global_leaderboard(_: User = Depends(current_user), db: AsyncSession = Depends(get_session)) -> list[dict]:
+    games = {game.id: game for game in (await db.execute(select(GameDefinition))).scalars()}
+    return await build_leaderboard(db, games, sort_descending=True)
+
+
+async def build_leaderboard(db: AsyncSession, games: dict[str, GameDefinition], sort_descending: bool) -> list[dict]:
+    sessions = (await db.execute(select(GameSession).where(GameSession.state.in_([SessionState.TIMED_OUT, SessionState.FINALIZED])))).scalars()
+    best: dict[tuple[str, str], dict] = {}
     games_played: dict[str, int] = {}
     for session in sessions:
+        game = games.get(session.game_id)
+        if not game:
+            continue
         for user_id, values in session.scores.items():
             games_played[user_id] = games_played.get(user_id, 0) + 1
             total = sum(float(value) for value in values.values())
-            current = best.get(user_id)
+            key = (session.game_id, user_id)
+            current = best.get(key)
             if current is None or (game.ranking_direction == "high" and total > current["score"]) or (game.ranking_direction == "low" and total < current["score"]):
-                best[user_id] = {"user_id": user_id, "score": total, "session_id": session.id}
-    users = {user.id: user.username for user in (await db.execute(select(User).where(User.id.in_(best.keys())))).scalars()}
-    rows = [{**value, "username": users.get(value["user_id"]), "games_played": games_played[value["user_id"]]} for value in best.values()]
-    rows.sort(key=lambda row: row["score"], reverse=game.ranking_direction == "high")
+                best[key] = {"user_id": user_id, "score": total, "session_id": session.id}
+    totals: dict[str, float] = {}
+    for (_, user_id), value in best.items():
+        totals[user_id] = totals.get(user_id, 0) + value["score"]
+    users = {user.id: user.username for user in (await db.execute(select(User).where(User.id.in_(totals.keys())))).scalars()}
+    rows = [{"user_id": user_id, "username": users.get(user_id), "score": total, "session_id": None, "games_played": games_played.get(user_id, 0)} for user_id, total in totals.items()]
+    rows.sort(key=lambda row: row["score"], reverse=sort_descending)
     rank = 0
     previous = None
     for index, row in enumerate(rows, start=1):
