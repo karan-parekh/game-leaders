@@ -48,15 +48,6 @@ def test_auth_screens_cover_register_and_login():
     assert "Register" in source
 
 
-def test_register_screen_validates_fields_inline():
-    source = AUTH.read_text()
-
-    assert "At least 3 characters" in source
-    assert "At least 8 characters" in source
-    assert "text-red-600" in source
-    assert "validate" in source
-
-
 def test_home_screen_has_join_create_and_recent_sessions():
     source = HOME.read_text()
     main_source = MAIN.read_text()

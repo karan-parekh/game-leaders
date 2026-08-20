@@ -1,5 +1,6 @@
 export type RankedParticipant = {
   user_id: string;
+  username: string;
   active: boolean;
   scores: Record<string, number>;
 };
