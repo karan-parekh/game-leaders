@@ -26,9 +26,21 @@ _Avoid_: Game template, catalog item
 A named numeric field used to record part of a participant's score.
 _Avoid_: Attribute, statistic
 
+**Score adjustment**:
+A change to a participant's metric score, either an increment during play or an explicit correction to the total.
+_Avoid_: Score event (an implementation event, not the domain action)
+
 **Game session**:
 One hosted play of a game definition, including its participants, current scores, and lifecycle state.
 _Avoid_: Table, room (room is only the discovery surface for a session)
+
+**Capacity**:
+The maximum number of participants a game session accepts at once.
+_Avoid_: Seats, max players
+
+**Session screen**:
+The shared live surface where participants see the current game session and record score adjustments.
+_Avoid_: Room screen (room is the discovery surface, while the session screen is the in-session experience)
 
 **Room code**:
 The six-character code used to find a game session.
@@ -45,5 +57,5 @@ A host-approved game session result that permanently contributes to the leaderbo
 _Avoid_: Submitted result, completed score
 
 **Leaderboard**:
-A per-game ranking of users based on their best finalized result, with ties sharing rank.
+A ranking of users based on their best finalized results: per-game views use the best result for that game, while the global view sums each user's best result in every game. Ties share rank.
 _Avoid_: Ranking table, standings (when referring to the product concept)
