@@ -17,7 +17,7 @@ Two concrete problems drove the change:
 The UI follows a single minimal direction:
 
 - **Function over form**: white/gray surfaces, one blue accent (`#2563eb`), system font stack, 1px borders, no shadows, no decorative shapes or rotations.
-- **Tailwind CSS v4** for all styling, expressed as utility classes directly in components — no custom CSS files, no design tokens to maintain.
+- **Tailwind CSS v4** for all styling, expressed as utility classes directly in components — no hand-authored component CSS or design tokens to maintain.
 - **Flexbox only** — CSS grid is banned from the UI.
 - **Mobile-first**: single-column layouts built for small screens; desktop is the enhancement, not the base.
 - **Flat-stack navigation**: a single home hub (join by code, recent sessions, create, leaderboard); detail screens push onto a stack with browser back-button support via `history.pushState`. No tab bar.

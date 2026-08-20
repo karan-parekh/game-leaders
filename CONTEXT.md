@@ -57,5 +57,5 @@ A host-approved game session result that permanently contributes to the leaderbo
 _Avoid_: Submitted result, completed score
 
 **Leaderboard**:
-A per-game ranking of users based on their best finalized result, with ties sharing rank.
+A ranking of users based on their best finalized results: per-game views use the best result for that game, while the global view sums each user's best result in every game. Ties share rank.
 _Avoid_: Ranking table, standings (when referring to the product concept)
