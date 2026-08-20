@@ -49,6 +49,7 @@ async def test_finalize_and_best_leaderboard(client):
     await client.post(f"/sessions/{first['id']}/finalize")
     board = await client.get(f"/leaderboards/{game_id}")
     assert board.json()[0]["score"] == 25
+    assert board.json()[0]["session_id"] == first["id"]
 
 
 @pytest.mark.asyncio

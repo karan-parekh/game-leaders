@@ -280,16 +280,16 @@ async def leaderboard(game_id: str, _: User = Depends(current_user), db: AsyncSe
     game = (await db.execute(select(GameDefinition).where(GameDefinition.id == game_id))).scalar_one_or_none()
     if not game:
         raise HTTPException(status_code=404, detail="Game not found")
-    return await build_leaderboard(db, {game_id: game}, sort_descending=game.ranking_direction == "high")
+    return await build_leaderboard(db, {game_id: game}, sort_descending=game.ranking_direction == "high", include_session_id=True)
 
 
 @app.get("/leaderboards")
 async def global_leaderboard(_: User = Depends(current_user), db: AsyncSession = Depends(get_session)) -> list[dict]:
     games = {game.id: game for game in (await db.execute(select(GameDefinition))).scalars()}
-    return await build_leaderboard(db, games, sort_descending=True)
+    return await build_leaderboard(db, games, sort_descending=True, include_session_id=False)
 
 
-async def build_leaderboard(db: AsyncSession, games: dict[str, GameDefinition], sort_descending: bool) -> list[dict]:
+async def build_leaderboard(db: AsyncSession, games: dict[str, GameDefinition], sort_descending: bool, include_session_id: bool) -> list[dict]:
     sessions = (await db.execute(select(GameSession).where(GameSession.state.in_([SessionState.TIMED_OUT, SessionState.FINALIZED])))).scalars()
     best: dict[tuple[str, str], dict] = {}
     games_played: dict[str, int] = {}
@@ -308,7 +308,8 @@ async def build_leaderboard(db: AsyncSession, games: dict[str, GameDefinition], 
     for (_, user_id), value in best.items():
         totals[user_id] = totals.get(user_id, 0) + value["score"]
     users = {user.id: user.username for user in (await db.execute(select(User).where(User.id.in_(totals.keys())))).scalars()}
-    rows = [{"user_id": user_id, "username": users.get(user_id), "score": total, "session_id": None, "games_played": games_played.get(user_id, 0)} for user_id, total in totals.items()]
+    session_ids = {user_id: value["session_id"] for (game_id, user_id), value in best.items() if game_id in games}
+    rows = [{"user_id": user_id, "username": users.get(user_id), "score": total, "session_id": session_ids.get(user_id) if include_session_id else None, "games_played": games_played.get(user_id, 0)} for user_id, total in totals.items()]
     rows.sort(key=lambda row: row["score"], reverse=sort_descending)
     rank = 0
     previous = None
