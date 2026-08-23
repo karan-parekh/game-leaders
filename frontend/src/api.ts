@@ -91,5 +91,4 @@ export const api = {
   updateScore: (sessionId: string, userId: string, metric: string, value: number) =>
     request<Session>(`/api/sessions/${sessionId}/scores/${userId}`, { method: "POST", body: JSON.stringify({ metric, value }) }),
   leaderboard: (gameId: string) => request<LeaderboardRow[]>(`/api/leaderboards/${gameId}`),
-  globalLeaderboard: () => request<LeaderboardRow[]>("/api/leaderboards"),
 };
