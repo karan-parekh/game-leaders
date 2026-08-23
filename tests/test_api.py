@@ -226,3 +226,9 @@ async def test_cache_invalidation_on_discard(client):
 async def test_global_leaderboard_endpoint_removed(client):
     response = await client.get("/leaderboards")
     assert response.status_code in [404, 405]
+
+
+@pytest.mark.asyncio
+async def test_leaderboard_events_404_for_unknown_game(client):
+    resp = await client.get("/leaderboards/does-not-exist/events")
+    assert resp.status_code == 404

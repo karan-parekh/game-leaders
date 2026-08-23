@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .cache import close_redis, etag, get_cached_leaderboard, init_redis, invalidate_leaderboard
 from .db import SessionLocal, engine, get_session
 from .models import AuthSession, Base, GameDefinition, GameSession, Participant, SessionState, User
-from .realtime import hub
+from .realtime import hub, leaderboard_hub
 from .schemas import Credentials, CreateSession, ScoreUpdate
 from .security import hash_password, new_session_id, verify_password
 
@@ -71,6 +71,7 @@ async def session_by_id(db: AsyncSession, session_id: str) -> GameSession:
         session.revision += 1
         await db.commit()
         await invalidate_leaderboard(session.game_id)
+        await publish_leaderboard_update(db, session.game_id)
     return session
 
 
@@ -90,6 +91,14 @@ async def publish_snapshot(db: AsyncSession, session: GameSession) -> dict:
     value = await snapshot(db, session)
     await hub.publish(session.id, value)
     return value
+
+
+async def publish_leaderboard_update(db: AsyncSession, game_id: str) -> None:
+    game = (await db.execute(select(GameDefinition).where(GameDefinition.id == game_id))).scalar_one_or_none()
+    if not game:
+        return
+    rows = await build_leaderboard(db, {game_id: game}, sort_descending=game.ranking_direction == "high", include_session_id=True)
+    await leaderboard_hub.publish(game_id, rows)
 
 
 @app.get("/health")
@@ -135,7 +144,7 @@ async def me(user: User = Depends(current_user)) -> dict[str, str]:
 
 
 @app.get("/games")
-async def games(_: User = Depends(current_user), db: AsyncSession = Depends(get_session)) -> list[dict]:
+async def games(db: AsyncSession = Depends(get_session)) -> list[dict]:
     definitions = (await db.execute(select(GameDefinition).order_by(GameDefinition.name))).scalars()
     return [{"id": game.id, "name": game.name, "default_timeout_minutes": game.default_timeout_minutes, "ranking_direction": game.ranking_direction, "metrics": game.metrics} for game in definitions]
 
@@ -252,6 +261,7 @@ async def finalize_session(session_id: str, user: User = Depends(current_user), 
     session.state = SessionState.FINALIZED
     await db.commit()
     await invalidate_leaderboard(session.game_id)
+    await publish_leaderboard_update(db, session.game_id)
     return await publish_snapshot(db, session)
 
 
@@ -263,6 +273,7 @@ async def discard_session(session_id: str, user: User = Depends(current_user), d
     session.state = SessionState.DISCARDED
     await db.commit()
     await invalidate_leaderboard(session.game_id)
+    await publish_leaderboard_update(db, session.game_id)
     await hub.publish(session.id, {"id": session.id, "state": SessionState.DISCARDED})
     return {"status": "discarded"}
 
@@ -317,6 +328,36 @@ async def leaderboard(game_id: str, request: Request, db: AsyncSession = Depends
             "ETag": response_etag,
         },
     )
+
+
+@app.get("/leaderboards/{game_id}/events")
+async def leaderboard_events(game_id: str, request: Request, db: AsyncSession = Depends(get_session)) -> StreamingResponse:
+    game = (await db.execute(select(GameDefinition).where(GameDefinition.id == game_id))).scalar_one_or_none()
+    if not game:
+        raise HTTPException(status_code=404, detail="Game not found")
+
+    queue = leaderboard_hub.subscribe(game_id)
+
+    async def _build():
+        return await build_leaderboard(db, {game_id: game}, sort_descending=game.ranking_direction == "high", include_session_id=True)
+
+    initial_rows, _ = await get_cached_leaderboard(game_id, _build)
+
+    async def stream():
+        try:
+            yield f"event: leaderboard\ndata: {json.dumps(initial_rows)}\n\n"
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    rows = await asyncio.wait_for(queue.get(), timeout=15)
+                    yield f"event: leaderboard\ndata: {json.dumps(rows)}\n\n"
+                except TimeoutError:
+                    yield ": keep-alive\n\n"
+        finally:
+            leaderboard_hub.unsubscribe(game_id, queue)
+
+    return StreamingResponse(stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 async def build_leaderboard(db: AsyncSession, games: dict[str, GameDefinition], sort_descending: bool, include_session_id: bool) -> list[dict]:
