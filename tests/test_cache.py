@@ -1,0 +1,103 @@
+import asyncio
+import json
+
+import pytest
+
+import app.cache as cache_module
+from app.db import SessionLocal
+
+
+class FakeRedis:
+    def __init__(self):
+        self.values = {}
+
+    async def get(self, key):
+        return self.values.get(key)
+
+    async def set(self, key, value, nx=False, ex=None):
+        if nx and key in self.values:
+            return False
+        self.values[key] = value
+        return True
+
+    async def setex(self, key, ttl, value):
+        self.values[key] = value
+
+    async def delete(self, key):
+        self.values.pop(key, None)
+
+    async def incr(self, key):
+        value = int(self.values.get(key, 0)) + 1
+        self.values[key] = str(value)
+        return value
+
+    async def eval(self, script, numkeys, version_key, payload_key, token, payload, ttl):
+        if self.values.get(version_key) != token:
+            return 0
+        self.values[payload_key] = payload
+        return 1
+
+
+@pytest.mark.asyncio
+async def test_invalidation_cannot_be_followed_by_stale_population(monkeypatch):
+    redis = FakeRedis()
+    monkeypatch.setattr(cache_module, "_cache", redis)
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def build():
+        started.set()
+        await release.wait()
+        return [{"score": 1}]
+
+    read = asyncio.create_task(cache_module.get_cached_leaderboard("game", build))
+    await started.wait()
+    await cache_module.invalidate_leaderboard("game")
+    release.set()
+    assert await read == ([{"score": 1}], False)
+    assert await redis.get("leaderboard:game:game") is None
+
+
+@pytest.mark.asyncio
+async def test_timeout_transition_invalidates_leaderboard_cache(client, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+
+    from app import main
+    from app.models import GameDefinition, GameSession, SessionState, User
+
+    async with SessionLocal() as db:
+        game = GameDefinition(name="Timeout Game", default_timeout_minutes=60, metrics=[])
+        user = User(username="timeout-host", password_hash="hash")
+        db.add_all([game, user])
+        await db.commit()
+        session = GameSession(
+            room_code="TIMEOUT",
+            host_id=user.id,
+            game_id=game.id,
+            name="Timeout",
+            capacity=2,
+            timeout_minutes=60,
+            metrics=[],
+            scores={},
+            state=SessionState.LIVE,
+            deadline=datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=1),
+        )
+        db.add(session)
+        await db.commit()
+        invalidated = []
+        async def record_invalidation(game_id):
+            invalidated.append(game_id)
+
+        monkeypatch.setattr(main, "invalidate_leaderboard", record_invalidation)
+        await main.session_by_id(db, session.id)
+
+    assert invalidated == [game.id]
+
+
+def test_compose_waits_for_redis_health():
+    import yaml
+
+    with open("docker-compose.yml") as compose_file:
+        services = yaml.safe_load(compose_file)["services"]
+    assert services["redis"]["healthcheck"]["test"] == ["CMD", "redis-cli", "ping"]
+    assert services["backend"]["depends_on"]["redis"]["condition"] == "service_healthy"
