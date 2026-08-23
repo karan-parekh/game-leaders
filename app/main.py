@@ -70,6 +70,7 @@ async def session_by_id(db: AsyncSession, session_id: str) -> GameSession:
         session.state = SessionState.TIMED_OUT
         session.revision += 1
         await db.commit()
+        await invalidate_leaderboard(session.game_id)
     return session
 
 

@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 import os
+import uuid
 from typing import Any, Optional
 
 try:
@@ -51,6 +52,23 @@ def redis_client() -> Optional["aioredis.Redis"]:
 LEADERBOARD_TTL = 60
 LOCK_TTL = 10
 LEADERBOARD_KEY_PREFIX = "leaderboard:game:"
+LEADERBOARD_VERSION_SUFFIX = ":version"
+STORE_IF_VERSION_MATCHES = """
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+    return redis.call('SET', KEYS[2], ARGV[2], 'EX', ARGV[3])
+end
+return 0
+"""
+INVALIDATE_IF_VERSIONED = """
+redis.call('INCR', KEYS[1])
+return redis.call('DEL', KEYS[2])
+"""
+RELEASE_LOCK_IF_OWNER = """
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+    return redis.call('DEL', KEYS[1])
+end
+return 0
+"""
 
 
 def etag(body: list[dict]) -> str:
@@ -63,6 +81,7 @@ async def get_cached_leaderboard(game_id: str, build_fn, *args, **kwargs) -> tup
         return await build_fn(*args, **kwargs), False
 
     key = f"{LEADERBOARD_KEY_PREFIX}{game_id}"
+    version_key = f"{key}{LEADERBOARD_VERSION_SUFFIX}"
 
     try:
         cached = await cache.get(key)
@@ -72,8 +91,17 @@ async def get_cached_leaderboard(game_id: str, build_fn, *args, **kwargs) -> tup
         logger.warning("Redis GET failed, rebuilding from DB", exc_info=True)
 
     lock_key = f"{key}:lock"
+    lock_token = uuid.uuid4().hex
     try:
-        acquired = await cache.set(lock_key, "1", nx=True, ex=LOCK_TTL)
+        version = await cache.get(version_key)
+        if version is None:
+            version = str(await cache.incr(version_key))
+    except Exception:
+        logger.warning("Redis version check failed, rebuilding from DB", exc_info=True)
+        version = None
+
+    try:
+        acquired = await cache.set(lock_key, lock_token, nx=True, ex=LOCK_TTL)
         if not acquired:
             await asyncio.sleep(0.1)
             return await get_cached_leaderboard(game_id, build_fn, *args, **kwargs)
@@ -82,16 +110,24 @@ async def get_cached_leaderboard(game_id: str, build_fn, *args, **kwargs) -> tup
 
     try:
         rows = await build_fn(*args, **kwargs)
-        if cache:
+        if cache and version is not None:
             try:
-                await cache.setex(key, LEADERBOARD_TTL, json.dumps(rows))
+                await cache.eval(
+                    STORE_IF_VERSION_MATCHES,
+                    2,
+                    version_key,
+                    key,
+                    version,
+                    json.dumps(rows),
+                    LEADERBOARD_TTL,
+                )
             except Exception:
                 logger.warning("Redis SET failed", exc_info=True)
         return rows, False
     finally:
         if cache:
             try:
-                await cache.delete(lock_key)
+                await cache.eval(RELEASE_LOCK_IF_OWNER, 1, lock_key, lock_token)
             except Exception:
                 pass
 
@@ -101,6 +137,7 @@ async def invalidate_leaderboard(game_id: str) -> None:
     if cache is None:
         return
     try:
-        await cache.delete(f"{LEADERBOARD_KEY_PREFIX}{game_id}")
+        key = f"{LEADERBOARD_KEY_PREFIX}{game_id}"
+        await cache.eval(INVALIDATE_IF_VERSIONED, 2, f"{key}{LEADERBOARD_VERSION_SUFFIX}", key)
     except Exception:
         logger.warning("Redis invalidation failed for game %s", game_id, exc_info=True)
