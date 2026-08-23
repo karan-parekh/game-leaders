@@ -12,6 +12,7 @@ dependencies = [
     "aiosqlite>=0.20.0",
     "pwdlib[argon2]>=0.2.1",
     "python-multipart>=0.0.12",
+    "redis[hiredis]>=5.0.0",
 ]
 
 [dependency-groups]

@@ -108,13 +108,15 @@ def test_leaderboard_screen_shows_ranked_rows():
     assert "games played" in source.lower()
 
 
-def test_leaderboard_screen_has_global_option():
+def test_leaderboard_screen_no_global_option():
     source = LEADERBOARD.read_text()
     api_source = API.read_text()
 
-    assert "api.globalLeaderboard(" in source
-    assert "All games" in source
-    assert "globalLeaderboard" in api_source
+    assert "api.globalLeaderboard(" not in source
+    assert "All games" not in source
+    assert "globalLeaderboard" not in api_source
+    assert "api.leaderboard(" in source
+    assert "api.games()" in source
 
 
 def test_toast_notification_component_exists():
