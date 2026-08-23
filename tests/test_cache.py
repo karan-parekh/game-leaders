@@ -37,6 +37,12 @@ class FakeRedis:
             self.values[version_key] = str(int(self.values.get(version_key, 0)) + 1)
             self.values.pop(payload_key, None)
             return 1
+        if "redis.call('DEL'" in script:
+            lock_key, token = args
+            if self.values.get(lock_key) == token:
+                self.values.pop(lock_key, None)
+                return 1
+            return 0
         version_key, payload_key, token = args[:3]
         if self.values.get(version_key) != token:
             return 0
@@ -45,6 +51,26 @@ class FakeRedis:
         payload = args[3]
         self.values[payload_key] = payload
         return 1
+
+
+class LockStealingRedis(FakeRedis):
+    async def set(self, key, value, nx=False, ex=None):
+        result = await super().set(key, value, nx=nx, ex=ex)
+        self.values[key] = "new-owner"
+        return result
+
+
+@pytest.mark.asyncio
+async def test_expired_lock_owner_cannot_delete_replacement_lock(monkeypatch):
+    redis = LockStealingRedis()
+    monkeypatch.setattr(cache_module, "_cache", redis)
+
+    async def build():
+        return [{"score": 1}]
+
+    await cache_module.get_cached_leaderboard("game", build)
+
+    assert redis.values["leaderboard:game:game:lock"] == "new-owner"
 
 
 @pytest.mark.asyncio
@@ -122,3 +148,4 @@ def test_compose_waits_for_redis_health():
         services = yaml.safe_load(compose_file)["services"]
     assert services["redis"]["healthcheck"]["test"] == ["CMD", "redis-cli", "ping"]
     assert services["backend"]["depends_on"]["redis"]["condition"] == "service_healthy"
+    assert "ports" not in services["redis"]

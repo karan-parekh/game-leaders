@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 import os
+import uuid
 from typing import Any, Optional
 
 try:
@@ -62,6 +63,12 @@ INVALIDATE_IF_VERSIONED = """
 redis.call('INCR', KEYS[1])
 return redis.call('DEL', KEYS[2])
 """
+RELEASE_LOCK_IF_OWNER = """
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+    return redis.call('DEL', KEYS[1])
+end
+return 0
+"""
 
 
 def etag(body: list[dict]) -> str:
@@ -84,6 +91,7 @@ async def get_cached_leaderboard(game_id: str, build_fn, *args, **kwargs) -> tup
         logger.warning("Redis GET failed, rebuilding from DB", exc_info=True)
 
     lock_key = f"{key}:lock"
+    lock_token = uuid.uuid4().hex
     try:
         version = await cache.get(version_key)
         if version is None:
@@ -93,7 +101,7 @@ async def get_cached_leaderboard(game_id: str, build_fn, *args, **kwargs) -> tup
         version = None
 
     try:
-        acquired = await cache.set(lock_key, "1", nx=True, ex=LOCK_TTL)
+        acquired = await cache.set(lock_key, lock_token, nx=True, ex=LOCK_TTL)
         if not acquired:
             await asyncio.sleep(0.1)
             return await get_cached_leaderboard(game_id, build_fn, *args, **kwargs)
@@ -119,7 +127,7 @@ async def get_cached_leaderboard(game_id: str, build_fn, *args, **kwargs) -> tup
     finally:
         if cache:
             try:
-                await cache.delete(lock_key)
+                await cache.eval(RELEASE_LOCK_IF_OWNER, 1, lock_key, lock_token)
             except Exception:
                 pass
 
