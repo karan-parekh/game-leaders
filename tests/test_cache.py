@@ -31,9 +31,18 @@ class FakeRedis:
         self.values[key] = str(value)
         return value
 
-    async def eval(self, script, numkeys, version_key, payload_key, token, payload, ttl):
+    async def eval(self, script, numkeys, *args):
+        if "redis.call('INCR'" in script:
+            version_key, payload_key = args
+            self.values[version_key] = str(int(self.values.get(version_key, 0)) + 1)
+            self.values.pop(payload_key, None)
+            return 1
+        version_key, payload_key, token = args[:3]
         if self.values.get(version_key) != token:
             return 0
+        if "redis.call('SET'" not in script:
+            return self.values.get(payload_key)
+        payload = args[3]
         self.values[payload_key] = payload
         return 1
 
@@ -56,6 +65,18 @@ async def test_invalidation_cannot_be_followed_by_stale_population(monkeypatch):
     release.set()
     assert await read == ([{"score": 1}], False)
     assert await redis.get("leaderboard:game:game") is None
+
+
+@pytest.mark.asyncio
+async def test_invalidation_bumps_version_and_deletes_payload_atomically(monkeypatch):
+    redis = FakeRedis()
+    monkeypatch.setattr(cache_module, "_cache", redis)
+    key = "leaderboard:game:game"
+    redis.values[key] = json.dumps([{"score": 1}])
+    await cache_module.invalidate_leaderboard("game")
+
+    assert redis.values[f"{key}:version"] == "1"
+    assert key not in redis.values
 
 
 @pytest.mark.asyncio

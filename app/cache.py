@@ -58,6 +58,10 @@ if redis.call('GET', KEYS[1]) == ARGV[1] then
 end
 return 0
 """
+INVALIDATE_IF_VERSIONED = """
+redis.call('INCR', KEYS[1])
+return redis.call('DEL', KEYS[2])
+"""
 
 
 def etag(body: list[dict]) -> str:
@@ -126,7 +130,6 @@ async def invalidate_leaderboard(game_id: str) -> None:
         return
     try:
         key = f"{LEADERBOARD_KEY_PREFIX}{game_id}"
-        await cache.incr(f"{key}{LEADERBOARD_VERSION_SUFFIX}")
-        await cache.delete(key)
+        await cache.eval(INVALIDATE_IF_VERSIONED, 2, f"{key}{LEADERBOARD_VERSION_SUFFIX}", key)
     except Exception:
         logger.warning("Redis invalidation failed for game %s", game_id, exc_info=True)
