@@ -9,6 +9,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .cache import close_redis, etag, get_cached_leaderboard, init_redis, invalidate_leaderboard
 from .db import SessionLocal, engine, get_session
 from .models import AuthSession, Base, GameDefinition, GameSession, Participant, SessionState, User
 from .realtime import hub
@@ -18,6 +19,7 @@ from .security import hash_password, new_session_id, verify_password
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    await init_redis()
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
     async with SessionLocal() as db_session:
@@ -25,9 +27,20 @@ async def lifespan(_: FastAPI):
             db_session.add_all([
                 GameDefinition(name="Catan", default_timeout_minutes=120, ranking_direction="high", metrics=[{"id": "points", "label": "Points"}]),
                 GameDefinition(name="Azul", default_timeout_minutes=90, ranking_direction="high", metrics=[{"id": "points", "label": "Points"}]),
+                GameDefinition(name="Ticket to Ride", default_timeout_minutes=60, ranking_direction="high", metrics=[{"id": "points", "label": "Points"}]),
+                GameDefinition(name="Wingspan", default_timeout_minutes=90, ranking_direction="high", metrics=[{"id": "points", "label": "Points"}]),
+                GameDefinition(name="Scythe", default_timeout_minutes=120, ranking_direction="high", metrics=[{"id": "points", "label": "Points"}]),
+                GameDefinition(name="Terraforming Mars", default_timeout_minutes=120, ranking_direction="high", metrics=[{"id": "points", "label": "Points"}]),
+                GameDefinition(name="Gloomhaven", default_timeout_minutes=180, ranking_direction="high", metrics=[{"id": "points", "label": "Points"}]),
+                GameDefinition(name="Pandemic", default_timeout_minutes=60, ranking_direction="high", metrics=[{"id": "points", "label": "Points"}]),
+                GameDefinition(name="Root", default_timeout_minutes=120, ranking_direction="high", metrics=[{"id": "points", "label": "Points"}]),
+                GameDefinition(name="Brass: Birmingham", default_timeout_minutes=120, ranking_direction="high", metrics=[{"id": "points", "label": "Points"}]),
+                GameDefinition(name="Spirit Island", default_timeout_minutes=120, ranking_direction="high", metrics=[{"id": "points", "label": "Points"}]),
+                GameDefinition(name="7 Wonders", default_timeout_minutes=45, ranking_direction="high", metrics=[{"id": "points", "label": "Points"}]),
             ])
             await db_session.commit()
     yield
+    await close_redis()
     await engine.dispose()
 
 
@@ -57,6 +70,7 @@ async def session_by_id(db: AsyncSession, session_id: str) -> GameSession:
         session.state = SessionState.TIMED_OUT
         session.revision += 1
         await db.commit()
+        await invalidate_leaderboard(session.game_id)
     return session
 
 
@@ -224,6 +238,7 @@ async def update_score(session_id: str, user_id: str, update: ScoreUpdate, actor
     session.scores = scores
     session.revision += 1
     await db.commit()
+    await invalidate_leaderboard(session.game_id)
     return await publish_snapshot(db, session)
 
 
@@ -236,6 +251,7 @@ async def finalize_session(session_id: str, user: User = Depends(current_user), 
         raise HTTPException(status_code=404, detail="Session not found")
     session.state = SessionState.FINALIZED
     await db.commit()
+    await invalidate_leaderboard(session.game_id)
     return await publish_snapshot(db, session)
 
 
@@ -246,6 +262,7 @@ async def discard_session(session_id: str, user: User = Depends(current_user), d
         raise HTTPException(status_code=403, detail="Host only")
     session.state = SessionState.DISCARDED
     await db.commit()
+    await invalidate_leaderboard(session.game_id)
     await hub.publish(session.id, {"id": session.id, "state": SessionState.DISCARDED})
     return {"status": "discarded"}
 
@@ -276,17 +293,30 @@ async def events(session_id: str, request: Request, user: User = Depends(current
 
 
 @app.get("/leaderboards/{game_id}")
-async def leaderboard(game_id: str, _: User = Depends(current_user), db: AsyncSession = Depends(get_session)) -> list[dict]:
+async def leaderboard(game_id: str, request: Request, db: AsyncSession = Depends(get_session)):
     game = (await db.execute(select(GameDefinition).where(GameDefinition.id == game_id))).scalar_one_or_none()
     if not game:
         raise HTTPException(status_code=404, detail="Game not found")
-    return await build_leaderboard(db, {game_id: game}, sort_descending=game.ranking_direction == "high", include_session_id=True)
 
+    async def _build():
+        return await build_leaderboard(db, {game_id: game}, sort_descending=game.ranking_direction == "high", include_session_id=True)
 
-@app.get("/leaderboards")
-async def global_leaderboard(_: User = Depends(current_user), db: AsyncSession = Depends(get_session)) -> list[dict]:
-    games = {game.id: game for game in (await db.execute(select(GameDefinition))).scalars()}
-    return await build_leaderboard(db, games, sort_descending=True, include_session_id=False)
+    rows, _ = await get_cached_leaderboard(game_id, _build)
+    response_etag = etag(rows)
+    if_none_match = request.headers.get("if-none-match")
+    if if_none_match and if_none_match == response_etag:
+        return Response(status_code=304, headers={
+            "ETag": response_etag,
+            "Cache-Control": "public, max-age=30, stale-while-revalidate=60",
+        })
+    return Response(
+        content=json.dumps(rows),
+        media_type="application/json",
+        headers={
+            "Cache-Control": "public, max-age=30, stale-while-revalidate=60",
+            "ETag": response_etag,
+        },
+    )
 
 
 async def build_leaderboard(db: AsyncSession, games: dict[str, GameDefinition], sort_descending: bool, include_session_id: bool) -> list[dict]:
