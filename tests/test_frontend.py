@@ -48,6 +48,16 @@ def test_auth_screens_cover_register_and_login():
     assert "Register" in source
 
 
+def test_auth_screens_have_leaderboard_button():
+    source = AUTH.read_text()
+    assert "View Leaderboard" not in source
+
+
+def test_landing_page_has_leaderboard_button():
+    source = MAIN.read_text()
+    assert "View Leaderboard" in source
+
+
 def test_home_screen_has_join_create_and_recent_sessions():
     source = HOME.read_text()
     main_source = MAIN.read_text()
@@ -117,6 +127,12 @@ def test_leaderboard_screen_no_global_option():
     assert "globalLeaderboard" not in api_source
     assert "api.leaderboard(" in source
     assert "api.games()" in source
+
+
+def test_leaderboard_screen_uses_sse_for_realtime_updates():
+    source = LEADERBOARD.read_text()
+    assert "EventSource" in source
+    assert "leaderboard" in source
 
 
 def test_toast_notification_component_exists():

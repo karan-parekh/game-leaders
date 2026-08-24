@@ -56,7 +56,7 @@ function App() {
       setScreen({ name: "home" });
       window.history.replaceState({}, "", "/home");
     }
-    if (!me && screen.name !== "landing" && screen.name !== "login" && screen.name !== "register") {
+    if (!me && screen.name !== "landing" && screen.name !== "login" && screen.name !== "register" && screen.name !== "leaderboard") {
       setScreen({ name: "landing" });
       window.history.replaceState({}, "", "/");
     }
@@ -90,6 +90,7 @@ function App() {
           <div className="flex flex-col gap-3">
             <button className="rounded bg-blue-600 px-4 py-3 text-sm font-semibold text-white" onClick={() => navigate({ name: "login" })}>Log in</button>
             <button className="rounded border border-gray-300 bg-white px-4 py-3 text-sm font-semibold text-gray-800" onClick={() => navigate({ name: "register" })}>Register</button>
+            <button className="rounded border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-semibold text-gray-600" onClick={() => navigate({ name: "leaderboard" })}>View Leaderboard</button>
           </div>
         </main>
       );
@@ -128,7 +129,7 @@ function App() {
       content = <SessionScreen sessionId={screen.id} me={me} onFinished={() => navigate({ name: "home" })} />;
       break;
     case "leaderboard":
-      content = <LeaderboardScreen onBack={() => navigate({ name: "home" })} />;
+      content = <LeaderboardScreen onBack={() => navigate(me ? { name: "home" } : { name: "landing" })} />;
       break;
   }
 

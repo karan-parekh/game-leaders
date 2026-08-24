@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, messageOf, type Game, type LeaderboardRow } from "./api";
 import { useToast } from "./toast";
 
@@ -9,6 +9,7 @@ export function LeaderboardScreen({ onBack }: { onBack: () => void }) {
   const [gameId, setGameId] = useState("");
   const [rows, setRows] = useState<LeaderboardRow[]>([]);
   const showToast = useToast();
+  const eventSourceRef = useRef<EventSource | null>(null);
 
   useEffect(() => {
     api.games().then((list) => {
@@ -21,7 +22,27 @@ export function LeaderboardScreen({ onBack }: { onBack: () => void }) {
 
   useEffect(() => {
     if (!gameId) return;
+
+    eventSourceRef.current?.close();
+
     api.leaderboard(gameId).then(setRows).catch((error) => showToast(messageOf(error)));
+
+    const es = new EventSource(`/api/leaderboards/${gameId}/events`);
+    eventSourceRef.current = es;
+
+    es.addEventListener("leaderboard", (event) => {
+      try {
+        setRows(JSON.parse(event.data));
+      } catch {
+        // ignore malformed events
+      }
+    });
+
+    es.onerror = () => {
+      es.close();
+    };
+
+    return () => { es.close(); };
   }, [gameId]);
 
   const currentGame = games.find((g) => g.id === gameId);
